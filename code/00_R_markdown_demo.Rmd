@@ -1,0 +1,95 @@
+---
+title: "00_RMarkdown_demo"
+author: "Antonia Netzl"
+date: "2025-09-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown Demo
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+You can load packages that contain R functions, you can include code chunks like this:
+
+```{r load_packages, echo=FALSE}
+# Package names
+packages <- c("knitr", "tidyverse")
+
+# Install packages not yet installed
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])
+}
+
+invisible(lapply(packages, library, character.only = TRUE))
+
+#set ggplot2 theme
+theme_set(theme_bw() + 
+            theme(strip.background.x = element_blank()))
+```
+
+
+You can read in data that is saved in csvs like this:
+
+```{r read_data}
+demo_data <- read.csv("../data/titerdata/01_artificial_titerdata.csv")
+```
+
+Here, `read.csv()` is a function that performs an operation on its argument. The argument is the filepath to the csv file, which 
+the function reads in and stores in the `data` object. The `<-` is a standard R assignement operator.
+
+You can write your own functions like this:
+
+```{r sum_function}
+
+# function_name, assignment operator, declaration that this is a function with (argument 1, argument 2). The 
+# function body is encapsulated by "{}" and the return() statement tells the function what to give back when it is called
+sum_up <- function(par1, par2){
+  
+  result <- par1 + par2
+  
+  return(result)
+}
+
+```
+
+You can then call the function like this:
+
+```{r}
+sum_up(4, 9)
+```
+
+You can also pass vectors, indicated to R by a `c()` to the function:
+
+```{r}
+sum_up(c(1:3), c(1, 2, 3))
+```
+
+We will be using the `ggplot2` package for plotting, which takes a data frame as `data` argument, followed 
+by aesthetic arguments, such as which column to take as x and y axis, in the `aes()` block. Finally,
+you need to tell ggplot what kind of plot you want, e.g. scatterpoints or lines:
+
+```{r}
+ggplot(data = demo_data, aes(x = X, y = serum_A)) + 
+  geom_point()
+```
