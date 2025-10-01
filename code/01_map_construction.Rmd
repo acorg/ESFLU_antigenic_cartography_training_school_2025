@@ -58,6 +58,35 @@ options(RacOptimizer.num_cores = parallel::detectCores())
 # and put this line in the file: options(RacOptimizer.num_cores = parallel::detectCores())
 ```
 
+
+## RacMacs GUI Demonstration
+
+To run the Racmacs' GUI run `runGUI()`. Then you can load a table (Antigens x Sera, rows x Columns) or an antigenic map. Importantly, the table cannot contain disconnected points, i.e items with only a single measurement above the detection threshold.
+
+Once the table is loaded, you can click the `Optimizations` tab, select your Optimization options, and run the optimization. 
+
+```{r Racviewer demo}
+runGUI()
+```
+
+The numbers in the lower left corner show the total map stress (error between measured titers and map distances), the stress per titer, followed by the stress per detectable titer. 
+
+The `Diagnostics` tab allows to `Check for hemisphering` (map positions with comparable stress) and `Move trapped points` (move points that are stuck in a local optimum, which could prevent the algorithm from finding the global optimum in the lowest stress map confirmation). The icons in the `Diagnostics` tab from left to write do the following: 
+
+1. Relax map from current position: Starts an optimization from the current map conformation
+
+2. Randomise points: Randomises positions for each point in the map (clicking `Move trapped points` afterwards optimises the map again)
+
+3. Connection lines: Black lines show which items are connected through titrations
+
+4. Error lines: Coloured impulses indicate the error between map position and measured titer (table distance). Blue impulses pointing from two objects to each other indicate that the table distance is smaller than the map distances (objects should be closer together in the map to decrease the error), red impulses pointing from two objects away from each other indicate the reverse. (Keyboard `Ctrl + E`)
+
+5. Manually move points: You can select individual items and then click the rightmost button, move the point to a new position and "Accept" or "Reject" it.
+
+6. Keyboard `Ctrl + T`: Activate titer lines that show the measured titer.
+
+## Constructing a map with inline code
+
 ### Load the titer data
 
 We will be working with artificial titer data. 
