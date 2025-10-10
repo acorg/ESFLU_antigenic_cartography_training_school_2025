@@ -1,0 +1,467 @@
+---
+title: "01 Map Construction"
+author: "Antonia Netzl (an604@cam.ac.uk)"
+date: "2025-06-05"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+rm(list = ls()) # clear environment at the beginning of each session
+# setwd(here::here("code/")) # set correct working directory. This line is optional 
+# as it did not work for some participants
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.width=8, fig.height=6,
+                      fig.align = "center")
+```
+
+This markdown contains the basic code to construct an antigenic map with the 
+`05_example_titertable.csv`. This titertable contains simulated data that was 
+generated to represent HAI assay data.
+
+The code was adapted from `01_map_construction_solution.Rmd` to show to make 
+a map with new data.
+
+### Load the required packages
+
+We will be using the [`ggplot2`])(<https://ggplot2.tidyverse.org>)
+package for plotting the titer data, the
+[`dplyr`](https://dplyr.tidyverse.org) and
+['tidyverse'](https://www.tidyverse.org) packages for handling the data,
+and the [`Racmacs`](https://acorg.github.io/Racmacs/index.html) package
+for constructing and examining antigenic maps.
+
+We will use [`knitr`](https://yihui.org/knitr/) for table formatting.
+
+```{r load_packages, echo=FALSE}
+# Package names
+packages <- c("Racmacs", "knitr", "tidyverse", "seqinr")
+
+# Install packages not yet installed
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])
+}
+
+invisible(lapply(packages, library, character.only = TRUE))
+
+#set ggplot2 theme
+theme_set(theme_bw() + 
+            theme(strip.background.x = element_blank()))
+
+# set Racmacs option to run on parallel cores
+options(RacOptimizer.num_cores = parallel::detectCores())
+
+# alternatively you can create a .Rprofile file in your home directory ~/ 
+# and put this line in the file: options(RacOptimizer.num_cores = parallel::detectCores())
+```
+
+## RacMacs GUI Demonstration
+
+To run the Racmacs' GUI run `runGUI()`. Then you can load a table
+(Antigens x Sera, rows x Columns) or an antigenic map. Importantly, the
+table cannot contain disconnected points, i.e items with only a single
+measurement above the detection threshold.
+
+To construct the new map in the `GUI`, you will select `Load table` and 
+then select the `05_example_titertable.csv` from where you have saved it 
+on your computer. I saved it in the `ESFLU_antigenic_cartography_training_school_2025/data/titerdata/05_example_titertable.csv`.
+
+Once the table is loaded, you can click the `Optimizations` tab, select
+your Optimization options (number of optimizations and dimensions), and run the optimization.
+
+```{r Racviewer demo}
+runGUI()
+```
+
+The numbers in the lower left corner show the total map stress (error
+between measured titers and map distances), the stress per titer,
+followed by the stress per detectable titer.
+
+The `Diagnostics` tab allows to `Check for hemisphering` (map positions
+with comparable stress) and `Move trapped points` (move points that are
+stuck in a local optimum, which could prevent the algorithm from finding
+the global optimum in the lowest stress map confirmation). The icons in
+the `Diagnostics` tab from left to write do the following:
+
+1.  Relax map from current position: Starts an optimization from the
+    current map conformation
+
+2.  Randomise points: Randomises positions for each point in the map
+    (clicking `Move trapped points` afterwards optimises the map again)
+
+3.  Connection lines: Black lines show which items are connected through
+    titrations
+
+4.  Error lines: Coloured impulses indicate the error between map
+    position and measured titer (table distance). Blue impulses pointing
+    from two objects to each other indicate that the table distance is
+    smaller than the map distances (objects should be closer together in
+    the map to decrease the error), red impulses pointing from two
+    objects away from each other indicate the reverse. (Keyboard
+    `Ctrl + E`)
+
+5.  Manually move points: You can select individual items and then click
+    the rightmost button, move the point to a new position and "Accept"
+    or "Reject" it.
+
+6.  Keyboard `Ctrl + T`: Activate titer lines that show the measured
+    titer.
+
+## Constructing a map with inline code
+
+Before we construc the map, we will plot the titerdata.
+
+### Load the titer data
+
+To load the data, we need to paste the correct path to it in the `read.csv()` function.
+We can find the path this document is currently working in with this command: 
+
+```{r get_path}
+getwd()
+```
+
+I am currently in `"/Users/antonia/Documents/smith/labbook/ESFLU_antigenic_cartography_training_school_2025/code"`, but the data is in `""/Users/antonia/Documents/smith/labbook/ESFLU_antigenic_cartography_training_school_2025/data/titerdata"`. 
+
+To get there from my current directory, I need to go up one directory. This is indicated as `..` in the path. If you are in the `ESFLU_antigenic_cartography_training_school_2025` directory, you don't have to add the `..` to the path:
+
+```{r load_data}
+# the file.path creates a file path from 
+# my current working directory (getwd())
+# up one directory (..)
+# to the final folder
+titerdata <- read.csv(file.path(getwd(),
+                                "..", 
+                                "data/titerdata/05_example_titertable.csv"), row.names = "X")
+
+# alternatively, you can use the "tab" on your keyboard to complete paths in R
+```
+
+Let's look at the format of the titer data:
+
+```{r}
+kable(titerdata)
+```
+
+The required input format to construct and antigenic map from titerdata
+is N(Antigens) x N(Sera), with a single row per antigen and a single
+column per serum. In each cell(antigen, serum) is the specific titer
+measurement.
+
+**Therefore, when reading in the data, make sure to select the antigen
+column as rowname.**
+
+## Visualising the titer data
+
+Antigenic assays are performed by serial dilutions of each serum,
+incubated with the same amount of virus. To reflect each titer as a
+single step in the dilution assay, we can apply a log2 transformation to
+each titer. A single unit difference then represents one dilutionstep
+(+1 = titer x 2; -1 = titer x 0.5).
+
+Antigenic distances are fold changes from the maximum titer antigen in
+one serum $s$ to the other antigens $i$ in the same serum. As one log2
+Unit corresponds to one fold change, we can calculate target antigenic
+distances the following way, applying a 1/10 transformation to each
+serum to center the serum on their maximum titer antigen:
+
+$$D_{i,s} = max(log_2(titer_{s}/10)) - log_2(titer_{i,s}/10)$$
+
+Which is the same as applying a log2 transformation to the linear fold
+changes:
+
+$$D_{i,s} = log_2(max(titer_{s})/titer_{i,s})$$
+
+By transforming the data in this way, we obtain a dissimilarity matrix:
+Higher values correspond to larger titer differences. The so obtained
+target distances are then used to optimize serum and antigen coordinates
+in Euclidean space, such that the Euclidean distance between each pair
+best represents the log2 titer fold change. The error between the target
+distance $D_t$ and map distance $d_m$ is reported as map stress:
+
+$$stress = (D_t - d_m)^2$$
+
+The antigenic map algorithm does this transformation of raw titers to
+Euclidean map distances automatically. **We still urge people to inspect
+their data before constructing an antigenic map, and think about the
+positions they expect for each serum and antigen pair**.
+
+So, let's visualise the log2 titers and fold changes to each antigen
+below.
+
+*First, we need to convert the data in a numeric object, as we have "<20", so 
+below assay detection threshold, values in the data. This means that R reads 
+every value as a character and therefore cannot perform numeric operations, such 
+as taking a logarithm.*
+
+```{r make_data_numeric}
+# we are creating a new object called titerdata_num that is the same as the titerdata
+titerdata_num <- titerdata
+
+# we are manually setting values from titerdata_num, where titerdata_num is equal to "<20" to 10
+# represeting the lower detection threshold/2
+# `apply` command applies everything written in the curly brackets {} after function to either the rows (1) or columns (2) or both (1:2) of the titerdata
+titerdata_num <- apply(titerdata, 1:2, function(x){ 
+  # it checks if the value in the cell is equal to "<20"
+  if(x == "<20"){
+    10 # and replaces it with 10
+  } else {
+    as.numeric(x) # otherwise it converts it to a number
+  }
+})
+
+# now we are converting the numeric data into a data.frame object 
+# which is an object in R that stores data in a way that makes it easy to work with
+titerdata_num <- as.data.frame(titerdata_num)
+```
+
+
+```{r}
+# now we are log2 converting the numeric titerdata for plotting purposes
+log2_data <- log2(titerdata_num/10)
+log2_data
+```
+
+```{r mutating_log2_data}
+# next we are changing the data such that it is in long format, 
+# meaning all values will be in a single column
+
+log2_data %>% # the "%>%" is a pipe operator, meaning take the object on the left of it and do 
+  # the stuff that is following behind
+  mutate(
+    Antigen = rownames(.) # here we are creating a new column called "Antigen" that is 
+  # equal to the rownames of the current object, indicated by the "."
+    ) %>% 
+  pivot_longer(
+    cols = colnames(titerdata), #now we are taking the columnames of the original table, 
+    names_to = "Serum", # which are all the sera, and telling R to move the column
+    values_to = "logtiter" # names into a new "Serum" column and the titer values into a "logtiter" column  
+    ) %>% 
+  group_by(Serum) %>%
+  mutate(  # here we are grouping by the serum to find the maximum logtiter per serum and # calculate the log-fold change, equal to the target distance in the map
+    max_logtiter = max(logtiter),
+    fc = max_logtiter -logtiter
+    ) -> log2_data_long 
+
+log2_data_long
+```
+
+Next, we will add a serum group column to the data to indicate which antigen they were infected with. This is the letter after the underscore in the serum name.
+
+```{r}
+# create a new column "sr_group" with the result of sapply
+log2_data_long$sr_group <- sapply( # sapply applies a function to a single column or vector
+  log2_data_long$Serum, # here the "serum column
+  function(x){ # the function's argument is called x
+  strsplit(x, "_")[[1]][2] # and in the function "x" is split at the "_" symbol, and the second part after this split is returned
+}
+)
+
+# now we group the data by the serum group to calculate the mean titer and fold change
+log2_data_long %>%
+  group_by(sr_group, Antigen) %>%
+  # we summarize, to create a smaller data frame for the mean data
+  summarize(
+    logtiter = mean(logtiter),
+    fc = round(mean(fc),1),
+    Serum = "GMT"
+  ) -> log2_data_mean
+
+```
+
+```{r}
+# now we will plot the data
+log2_data_mean %>% # we begin with the mean data
+  ggplot(
+    aes(x = Antigen, # take the Antigen column as x axis
+        y = logtiter, # and the logtiter as y axis
+        color = sr_group, # color each serum by the serum group
+        group = Serum # and connect lines per individual serum
+        )
+    ) +
+  geom_point() + # add points
+  geom_line() + # add lines
+  geom_point(data = log2_data_long, # add points for the individual samples
+             alpha = 0.4 # at higher transparency
+             ) + 
+  geom_line(data = log2_data_long, # and lines for the individual sera at higher transparency
+             alpha = 0.4
+            ) + 
+  facet_wrap(~sr_group,
+             ncol = 5) + # make individual panels per serum group with 5 columns
+  ylim(c(0, max(log2_data_long$logtiter) + 1)) + # make the lower y limit 0 and the upper y limit + 1
+  geom_text(aes(label = fc), y = max(log2_data_long$logtiter) + 0.5) +  # add the mean fold change label at a y position equal to the maximum titer
+  geom_rect( # here we add a rectangle
+    aes(xmin = -Inf, # starting at - infinity on the x axis
+        xmax = Inf, # ending at infinity on the x axis
+        ymin = -Inf, # startin at -infinity on the y axis
+        ymax = log2(20/10)), # and edding at the assay detection threshold 20 on the log2 scale
+    color = NA, # without any color for the line around the rectangle
+    fill = "grey", # but a grey fill color
+    alpha = 0.1 # that is transparend (alpha = 1 is full opacity)
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1) # and we make the x axis labels at 45 degree angle
+  )
+```
+
+The target antigenic distance for each serum and antigen pair is written
+at the top. The grey area indicates the detection limit of
+20 (log2(20/10) = 1). Despite discrete dilution steps in the HAI assay, 
+the geometric mean titer (mean on the log-scale) and fold changes are 
+continuous values as they are the mean of discrete values.
+
+## Making an antigenic map
+
+The antigenic map algorithm transforms raw data into a dissimilarity
+matrix and performs multidimensional scaling (MDS) to preserve the
+relationships within the data to position the points in a lower
+dimension.
+
+The required input format to construct and antigenic map from titer data
+is N(Antigens) x N(Sera), with a single row per antigen and a single
+column per serum. In each cell(antigen, serum) is the specific titer
+measurement without log2 transformation.
+
+Please try and construct a 2D antigenic map with the
+`Racmacs make.acmap()` function and the `titerdata` object in the
+correct format. Let's also plot the map and display the map stress and
+antigen labels, you can find information on the functions on the
+[Racmacs reference
+page](https://acorg.github.io/Racmacs/reference/index.html):
+
+```{r}
+set.seed(100) # to make results reproducible
+
+map <- make.acmap(titerdata,
+                  ag_names = rownames(titerdata),
+                  sr_names = colnames(titerdata),
+                  number_of_dimensions = 2,
+                  number_of_optimizations = 100)
+
+# check the dilutionstepsize
+dilutionStepsize(map)
+```
+
+The default dilution stepsize in Racmacs is 1, corresponding to 1 two-fold 
+dilution in the assay.
+
+
+
+In the lower left corner we see that the map stress is 0, so Euclidean
+map distance and target titer distance match perfectly. The sera (open
+squares) are at the exact same location as their highest titer antigens
+(colored spheres). We can change the size of the sera:
+
+```{r}
+plot(map, plot_stress = TRUE,
+     plot_labels = "antigens",
+     label.offset = c(0.5))
+```
+
+
+## Map styling
+
+We can change the color of antigens and sera, their size and their
+opacity with the following functions:
+`agFill(), agOutline(), agOutlineWidth(), agSize(), srFill(), srOutline(), srOutlineWidth(), srSize()`.
+The opacity can be adjusted with the `adjustcolor()` function.
+
+The order per field corresponds to the order of the `agNames(map)` and
+`srNames(map)` fields, so if we want to color the B antigen and serum
+blue, we have to match the field to the correct name:
+
+```{r}
+srOutlineWidth(map) <- 1
+
+srOutline(map) <- adjustcolor(srOutline(map), alpha.f = 0.7)
+agFill(map) <- adjustcolor(agFill(map), alpha.f = 0.8)
+
+agFill(map)[grepl("_B", agNames(map))] <- "blue"
+srOutline(map)[grepl("_B", srNames(map))] <- "blue"
+
+plot(map,
+     plot_labels = "antigens",
+     label.offset = 0.5,
+     plot_stress = TRUE)
+```
+
+We can add meta information on sera and antigens using the
+`agGroups(), srGroups()` field, e.g. the homologous variant for each
+sera and then color accordingly, also by supplying an external file. The
+x-, and y- limits can be supplied to the `plot`, and you can access
+automatically generated plot limits with the `Racmacs:::mapPlotLims()`
+function. The triple dots and call to Racmacs are necessary to find the
+function.
+
+```{r}
+lims <- Racmacs:::mapPlotLims(map, sera = TRUE)
+
+agGroups(map) <- sapply(agNames(map), function(x){
+  strsplit(x, "_")[[1]][2]
+} )
+srGroups(map) <- sapply(srNames(map), function(x){
+  strsplit(x, "_")[[1]][2]
+})
+
+map_colors <- c("A" = "red",
+                "B" = "blue",
+                "C" = "purple",
+                "E" = "green",
+                "D" = "yellow")
+
+agFill(map) <- map_colors[agGroups(map)]
+srOutline(map) <- map_colors[srGroups(map)]
+
+plot(map,
+     plot_labels = "antigens",
+     label.offset = 0.5,
+     plot_stress = TRUE,
+     xlim = lims$xlim,
+     ylim = lims$ylim)
+```
+
+We can look at an example optimization run in the interactive Racmacs
+Viewer with Error Lines on. Error lines indicate the error per serum and
+antigen pair: Blue lines indicate that the error would be reduced if the
+pair was closer to each other than their current position ("pull") and
+red lines indicate the opposite ("push").
+
+To do that, move to the "Diagnostics" tab, activate the second panel to
+the right with the "E". Then click on the second panel to the left,
+which randomizes point position.
+
+What does this do with the map stress? What does this do to the error
+lines?
+
+Then click on the "Relax map" panel on the left, which optimizes the
+map. What happens?
+
+```{r}
+# RacViewer(map) 
+# if the RacViewer does not work, you can save your map and open it the in the 
+# runGUI() function
+save.acmap(map, "../data/maps/05_example_map.ace")
+```
+
+The RacViewer shows in addition to the absolute map stress in the bottom
+left corner also the stress per titer, followed by the stress per
+detectable titer in square brackets. This makes maps with different
+numbers of objects comparable, as including more sera and antigens in a
+map will increase the absolute map stress.
+
+### Point triangulation
+
+To assess how well triangulated each point in the map is, we can use the
+`triangulationBlobs()` function. It calculates the position each point
+can occupy in the map without increasing the map stress by more than a
+user specified unit (`stress_lim`). A bigger area indicates that a
+point's position is less triangulated by the given data, and its
+position is not well resolved.
+
+```{r}
+plot(triangulationBlobs(map, stress_lim = 1, grid_spacing = 0.05))
+
+```
